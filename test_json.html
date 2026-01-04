@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>JSON 结构测试</title>
+</head>
+<body>
+    <h1>JSON 数据结构测试</h1>
+    <input type="file" id="fileInput" accept=".json">
+    <pre id="output"></pre>
+
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        const output = document.getElementById('output');
+
+                        let info = '=== JSON 数据结构分析 ===\n\n';
+                        info += '所有字段:\n' + Object.keys(data).join('\n') + '\n\n';
+
+                        info += 'prompt: ' + (data.prompt ? '✓ 存在' : '✗ 不存在') + '\n';
+                        info += 'example_answer_reference: ' + (data.example_answer_reference ? '✓ 存在' : '✗ 不存在') + '\n';
+                        info += 'system_prompt: ' + (data.system_prompt ? '✓ 存在' : '✗ 不存在') + '\n';
+                        info += 'rubrics: ' + (data.rubrics ? '✓ 存在 (' + data.rubrics.length + ' 项)' : '✗ 不存在') + '\n\n';
+
+                        info += '完整数据:\n' + JSON.stringify(data, null, 2);
+
+                        output.textContent = info;
+                    } catch (error) {
+                        document.getElementById('output').textContent = '错误: ' + error.message;
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+    </script>
+</body>
+</html>
