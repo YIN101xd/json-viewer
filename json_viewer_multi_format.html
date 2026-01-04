@@ -978,7 +978,14 @@
             // 评分表格
             const rubrics = data.rubrics || [];
             if (rubrics.length > 0) {
-                const responseKeys = getResponseKeys(rubrics[0]);
+                const scoreColumns = getAllScoreKeysDR(data);
+                console.log('DR Format - Score Columns:', scoreColumns);
+                console.log('DR Format - Number of rubrics:', rubrics.length);
+                console.log('DR Format - Number of columns:', scoreColumns.length);
+                console.log('DR Format - Has rubric_auto_score:', !!data.rubric_auto_score);
+                if (scoreColumns.length > 0) {
+                    console.log('DR Format - Sample score value:', getScoreValue(rubrics[0], scoreColumns[0], data));
+                }
 
                 html += `
                     <div class="scoring-section">
@@ -990,8 +997,8 @@
                                         <th style="min-width: 40px;">#</th>
                                         <th style="min-width: 300px;">评分项</th>
                                         <th style="min-width: 80px;">权重</th>
-                                        ${responseKeys.map(key => `
-                                            <th style="min-width: 90px;">${formatResponseKey(key)}</th>
+                                        ${scoreColumns.map(col => `
+                                            <th style="min-width: 90px;">${formatColumnName(col)}</th>
                                         `).join('')}
                                     </tr>
                                 </thead>
@@ -1004,8 +1011,8 @@
                                                 ${rubric.rubric_tag && rubric.rubric_tag.category ? `<div class="rubric-category">${rubric.rubric_tag.category}</div>` : ''}
                                             </td>
                                             <td>${rubric.rubric_weight || 0}</td>
-                                            ${responseKeys.map(key => `
-                                                <td class="score-cell">${formatScore(rubric.scores ? rubric.scores[key] : null)}</td>
+                                            ${scoreColumns.map(col => `
+                                                <td class="score-cell">${formatScore(getScoreValue(rubric, col, data))}</td>
                                             `).join('')}
                                         </tr>
                                     `).join('')}
@@ -1030,17 +1037,122 @@
         function getResponseKeys(rubric) {
             if (!rubric || !rubric.scores) return [];
             return Object.keys(rubric.scores)
-                .filter(key => key.includes('human_score') && !key.includes('reason'))
+                .filter(key => (key.includes('human_score') || key.includes('auto_score')) && !key.includes('reason'))
                 .sort();
         }
 
-        function formatResponseKey(key) {
-            // response_1_human_score_1 -> 模型 1
-            const match = key.match(/response_(\d+)_human_score/);
-            if (match) {
-                return `模型 ${match[1]}`;
+        function getAllScoreKeysDR(data) {
+            // 收集所有评分列：每个 response 一个 human 列 + 一个 auto 列
+            const columns = [];
+
+            // 1. 从 rubrics[].scores 中找出有哪些 response 的 human 分数
+            if (data.rubrics && data.rubrics.length > 0) {
+                const humanScoreKeys = Object.keys(data.rubrics[0].scores || {})
+                    .filter(key => key.includes('human_score') && !key.includes('reason'));
+
+                // 提取 response 编号
+                const responseNums = new Set();
+                humanScoreKeys.forEach(key => {
+                    const match = key.match(/response_(\d+)_human_score/);
+                    if (match) responseNums.add(parseInt(match[1]));
+                });
+
+                // 为每个 response 添加 human 列，获取模型名称
+                Array.from(responseNums).sort((a, b) => a - b).forEach(num => {
+                    let modelName = `Response ${num}`;
+                    const mrKey = `model_response_${num}`;
+                    if (data.model_response && data.model_response[mrKey] && data.model_response[mrKey].model_name) {
+                        modelName = data.model_response[mrKey].model_name;
+                    }
+                    columns.push({ type: 'human', responseNum: num, key: `response_${num}_human`, modelName: modelName });
+                });
             }
-            return key;
+
+            // 2. 从 rubric_auto_score 中找出有哪些 response 的 auto 分数
+            if (data.rubric_auto_score) {
+                const responseNums = new Set();
+                Object.keys(data.rubric_auto_score).forEach(key => {
+                    // 从 rubric_1_response_1_auto_score 中提取 response 编号
+                    const match = key.match(/rubric_\d+_response_(\d+)_auto_score/);
+                    if (match) responseNums.add(parseInt(match[1]));
+                });
+
+                // 为每个 response 添加 auto 列，获取模型名称
+                Array.from(responseNums).sort((a, b) => a - b).forEach(num => {
+                    let modelName = `Response ${num}`;
+                    const mrKey = `model_response_${num}`;
+                    if (data.model_response && data.model_response[mrKey] && data.model_response[mrKey].model_name) {
+                        modelName = data.model_response[mrKey].model_name;
+                    }
+                    columns.push({ type: 'auto', responseNum: num, key: `response_${num}_auto`, modelName: modelName });
+                });
+            }
+
+            // 3. 备用：从 model_response[].scores 中找（如果 rubric_auto_score 不存在）
+            if (!data.rubric_auto_score && data.model_response) {
+                const responseNums = new Set();
+                Object.values(data.model_response).forEach(mr => {
+                    if (mr.scores && Object.keys(mr.scores).length > 0) {
+                        Object.keys(mr.scores).forEach(key => {
+                            const match = key.match(/rubric_\d+_response_(\d+)_auto_score/);
+                            if (match) responseNums.add(parseInt(match[1]));
+                        });
+                    }
+                });
+
+                Array.from(responseNums).sort((a, b) => a - b).forEach(num => {
+                    let modelName = `Response ${num}`;
+                    const mrKey = `model_response_${num}`;
+                    if (data.model_response && data.model_response[mrKey] && data.model_response[mrKey].model_name) {
+                        modelName = data.model_response[mrKey].model_name;
+                    }
+                    columns.push({ type: 'auto', responseNum: num, key: `response_${num}_auto`, modelName: modelName });
+                });
+            }
+
+            return columns;
+        }
+
+        function getScoreValue(rubric, column, data) {
+            // column 是 { type: 'human'/'auto', responseNum: 1, key: 'response_1_human' }
+            const rubricNum = rubric.rubric_number;
+            const responseNum = column.responseNum;
+
+            if (column.type === 'human') {
+                // 从 rubric.scores 中获取 human 分数
+                const key = `response_${responseNum}_human_score_1`;
+                if (rubric.scores && rubric.scores[key] !== undefined) {
+                    return rubric.scores[key];
+                }
+            } else if (column.type === 'auto') {
+                const scoreKey = `rubric_${rubricNum}_response_${responseNum}_auto_score`;
+
+                // 优先从 data.rubric_auto_score 中获取
+                if (data.rubric_auto_score && data.rubric_auto_score[scoreKey] !== undefined) {
+                    return data.rubric_auto_score[scoreKey];
+                }
+
+                // 备用：从 model_response_{responseNum}.scores 中获取
+                const mrKey = `model_response_${responseNum}`;
+                if (data.model_response && data.model_response[mrKey]) {
+                    if (data.model_response[mrKey].scores && data.model_response[mrKey].scores[scoreKey] !== undefined) {
+                        return data.model_response[mrKey].scores[scoreKey];
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        function formatColumnName(column) {
+            // column 是 { type: 'human'/'auto', responseNum: 1, key: 'response_1_human', modelName: 'gpt5_high_search' }
+            const modelName = column.modelName || `Response ${column.responseNum}`;
+            if (column.type === 'human') {
+                return `${modelName}<br>(Human)`;
+            } else if (column.type === 'auto') {
+                return `${modelName}<br>(Auto)`;
+            }
+            return column.key;
         }
 
         function calculateTotalScoresDR(rubrics) {
