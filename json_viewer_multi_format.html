@@ -860,7 +860,7 @@
                                         <th style="min-width: 120px;">评分项</th>
                                         <th style="min-width: 80px;">权重</th>
                                         ${modelScoreKeys.map(key => `
-                                            <th style="min-width: 90px;">${formatModelName(key.replace('auto_score_', ''))}</th>
+                                            <th style="min-width: 90px;">${formatScoreColumnName(key)}</th>
                                         `).join('')}
                                     </tr>
                                 </thead>
@@ -1029,9 +1029,21 @@
 
         function getModelScoreKeysKimi(rubric) {
             if (!rubric) return [];
-            return Object.keys(rubric)
+            const keys = [];
+
+            // 首先添加所有自动评分列
+            const autoScoreKeys = Object.keys(rubric)
                 .filter(key => key.startsWith('auto_score_'))
                 .sort();
+            keys.push(...autoScoreKeys);
+
+            // 然后添加人评分列
+            const humanScoreKeys = Object.keys(rubric)
+                .filter(key => key.startsWith('rubric_human_score_') && !key.includes('reason'))
+                .sort();
+            keys.push(...humanScoreKeys);
+
+            return keys;
         }
 
         function getResponseKeys(rubric) {
@@ -1186,6 +1198,19 @@
                 'openai/gpt-5.2': 'GPT 5.2'
             };
             return shortNames[name] || name.split('/').pop();
+        }
+
+        function formatScoreColumnName(key) {
+            // 处理人评分列
+            if (key.startsWith('rubric_human_score_')) {
+                const modelNum = key.replace('rubric_human_score_model', '');
+                return `Model ${modelNum}<br>(Human)`;
+            }
+            // 处理自动评分列
+            if (key.startsWith('auto_score_')) {
+                return formatModelName(key.replace('auto_score_', ''));
+            }
+            return key;
         }
 
         function formatScore(score) {
